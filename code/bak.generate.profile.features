@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Script to generate discriminating features from user profile
+
+# Rational: We could harnese good signal from profile info
+# One way to tell whether a twitter account belongs to a researcher or not is to see if 
+# the user uses terms like: i'm phd, researcher, scientist etc.
+
+# Accept command line arguments
+if [[ $# -eq 3 ]]
+then
+   user_info=$1
+   conf_info=$2
+   random_info=$3
+else
+   echo "usage: ./generate_profile_features.sh <user info> <conf info> <random info>"
+   exit 1
+fi
+
+join -t$'\t' -1 1 -2 1 <(sort -t$'\t' -k1,1 ../users/user.info) <(sort -t$'\t' -k1,1 dblp/user.ids) > __user.info.indblp
+
+# tokens (uni-grams)
+#--------------------------------------------------
+cut -f1,5 __user.info.indblp | grep -v $'\t\s*$' |awk -F"\t" 'OFS="\t" {gsub(" ", "\n"$1"\t", $2); print $0}' |sed 's/[[:punct:]]*$//g' | tr 'A-Z' 'a-z' | sort -u | cut -f2 | sort | uniq -c | sort -nr | sed 's/ *//; s/ /\t/' | awk -F"\t" '{if ($1 > 5) print $2"\t"$1}' | sort -t$'\t' -k1,1 > __token__#indblp
+
+cut -f1,5 ../conferences/conf.info | grep -v $'\t\s*$' |awk -F"\t" 'OFS="\t" {gsub(" ", "\n"$1"\t", $2); print $0}' |sed 's/[[:punct:]]*$//g' | tr 'A-Z' 'a-z' | sort -u | cut -f2 | sort | uniq -c | sort -nr | sed 's/ *//; s/ /\t/' | awk -F"\t" '{if ($1 > 1) print $2"\t"$1}' | sort -t$'\t' -k1,1 > __token__#conf
+
+cut -f1,5 ../non_researchers/negative.info | grep -v $'\t\s*$' |awk -F"\t" 'OFS="\t" {gsub(" ", "\n"$1"\t", $2); print $0}' |sed 's/[[:punct:]]*$//g' | tr 'A-Z' 'a-z' | sort -S3G -u | cut -f2 | sort -S3G | uniq -c | sort -S3G -nr | sed 's/ *//; s/ /\t/' | awk -F"\t" '{if ($1 > 5) print $2"\t"$1}' | sort -t$'\t' -k1,1 > __token__#nonresearchers
+
+join -t$'\t' -a1 -a2 -e "NA" -1 1 -2 1 -o'0 1.2 2.2' __token__#indblp __token__#conf | awk -F"\t" '{if ($2 == "NA") print $0}' |sort -t$'\t' -k3,3nr > unigram.confonly
+
+join -t$'\t' -a1 -a2 -e "NA" -1 1 -2 1 -o'0 1.2 2.2' __token__#indblp __token__#conf | awk -F"\t" '{if ($3 == "NA") print $0}' |sort -t$'\t' -k2,2nr > unigram.dblponly
+
+# bi-grams
+#--------------------------------------------------
+## users
+cut -f1,5 __user.info.indblp | grep -v $'\t\s*$' |awk -F"\t" 'OFS="\t" {gsub(" ", "\n"$1"\t", $2); print $0}' |sed 's/[[:punct:]]*$//g' | tr 'A-Z' 'a-z' > __userId__profile.words
+
+tail -n+2 __userId__profile.words > __userId__profile.nextwords
+
+paste __userId__profile.words __userId__profile.nextwords |awk -F"\t" '{if ($1 == $3) print $1"\t"$2"\t"$4}' |sort -u |cut -f2,3 |sort | uniq -c | sort -nr | sed 's/ *//; s/ /\t/' | awk -F"\t" '{if($1 > 5) print $2" "$3"\t"$1}' | sort -t$'\t' -k1,1 > __bigram__#indblp
+
+## confs
+cut -f1,5 ../conferences/conf.info | grep -v $'\t\s*$' |awk -F"\t" 'OFS="\t" {gsub(" ", "\n"$1"\t", $2); print $0}' |sed 's/[[:punct:]]*$//g' | tr 'A-Z' 'a-z' > __confId__profile.words
+
+tail -n+2 __confId__profile.words > __confId__profile.nextwords
+
+paste __confId__profile.words __confId__profile.nextwords |awk -F"\t" '{if ($1 == $3) print $1"\t"$2"\t"$4}' |sort -u |cut -f2,3 |sort | uniq -c | sort -nr | sed 's/ *//; s/ /\t/' | awk -F"\t" '{if($1 > 5) print $2" "$3"\t"$1}' | sort -t$'\t' -k1,1 > __bigram__#conf
+
+## non-researchers
+cut -f1,5 ../non_researchers/negative.info | grep -v $'\t\s*$' |awk -F"\t" 'OFS="\t" {gsub(" ", "\n"$1"\t", $2); print $0}' |sed 's/[[:punct:]]*$//g' | tr 'A-Z' 'a-z' > __nonResearcherId__profile.words
+
+tail -n+2 __nonResearcherId__profile.words > __nonResearcherId__profile.nextwords
+
+paste __nonResearcherId__profile.words __nonResearcherId__profile.nextwords  |awk -F"\t" '{if ($1 == $3) print $1"\t"$2"\t"$4}' |sort -u |cut -f2,3 |sort | uniq -c | sort -nr | sed 's/ *//; s/ /\t/' | awk -F"\t" '{if($1 > 5) print $2" "$3"\t"$1}' | sort -t$'\t' -k1,1 > __bigram__nonresearchers
+
+join -t$'\t' -a1 -a2 -e "NA" -1 1 -2 1 -o'0 1.2 2.2' __bigram__#indblp __bigram__#conf |sort -t$'\t' -k2,2nr -k3,3nr | awk -F"\t" '{if ($3 == "NA") print $0}' > bigram.dblponly
+join -t$'\t' -a1 -a2 -e "NA" -1 1 -2 1 -o'0 1.2 2.2' __bigram__#indblp __bigram__#conf |sort -t$'\t' -k2,2nr -k3,3nr | awk -F"\t" '{if ($2 == "NA") print $0}' > bigram.confonly
+
+cat unigram.confonly bigram.confonly |cut -f1 |awk -F"\t" '{print $0"\tfalse"}' > profile.features
+cat unigram.dblponly bigram.dblp | cut -f1 |awk -F"\t" '{print $0"\ttrue"}' >> profile.features
+
+
+#--------------------------------------------------
+# Signal from urls in user profile
+
+cut -f1,14 ../users/user.info |grep -v $'\t$' |grep -vi '^[a-z]' | sort -t$'\t' -k2,2 > __userId__url
+cut -f1,14 ../conferences/conf.info |grep -v $'\t$' |grep -vi '^[a-z]' | sort -t$'\t' -k2,2 > __confId__url
+cut -f2 __confId__url | code/unshortenURL.py > conf.url
+cut -f2 __userId__url | sed '/^$/d' | sed '/^[0-9]*$/d' |sort -u |shuf | code/unshortenURL.py > user.url
+
+
